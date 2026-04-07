@@ -7,6 +7,7 @@ COPY frontend/ ./
 RUN npm run build
 # Stage 2: Final image — Python only
 FROM python:3.12-slim
+ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 COPY backend/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt

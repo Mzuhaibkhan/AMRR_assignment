@@ -8,9 +8,6 @@ import os
 
 import models, schemas, crud
 from database import engine, get_db
-
-# Create the database tables automatically
-# In a real-world scenario, you might want to use Alembic for migrations
 models.Base.metadata.create_all(bind=engine)
 
 from fastapi import FastAPI, Depends, HTTPException, Request
@@ -18,6 +15,30 @@ from fastapi.responses import JSONResponse
 import traceback
 
 app = FastAPI(title="Task Management API")
+
+@app.on_event("startup")
+async def startup_message():
+    print("\n✨ Task Management App is running!")
+    print("👉 Open in browser: http://localhost:8000\n")
+    import asyncio
+    asyncio.create_task(keep_alive())
+
+async def keep_alive():
+    """Pings the server every 10 minutes to prevent Render from sleeping."""
+    import asyncio
+    import urllib.request
+    render_url = os.environ.get("RENDER_EXTERNAL_URL")
+    if not render_url:
+        print("ℹ️  RENDER_EXTERNAL_URL not set, keep-alive disabled (local dev).")
+        return
+    ping_url = f"{render_url}/api/tasks"
+    while True:
+        await asyncio.sleep(600)  # 10 minutes
+        try:
+            urllib.request.urlopen(ping_url, timeout=10)
+            print(f"🏓 Keep-alive ping sent to {ping_url}")
+        except Exception as e:
+            print(f"⚠️  Keep-alive ping failed: {e}")
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
