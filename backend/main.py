@@ -24,12 +24,11 @@ async def startup_message():
     asyncio.create_task(keep_alive())
 
 async def keep_alive():
-    """Pings the server every 10 minutes to prevent Render from sleeping."""
     import asyncio
     import urllib.request
-    render_url = os.environ.get("RENDER_EXTERNAL_URL")
+    render_url = os.environ.get("https://orbit-tasks.onrender.com")
     if not render_url:
-        print("ℹ️  RENDER_EXTERNAL_URL not set, keep-alive disabled (local dev).")
+        print("  RENDER_EXTERNAL_URL not set, keep-alive disabled (local dev).")
         return
     ping_url = f"{render_url}/api/tasks"
     while True:
