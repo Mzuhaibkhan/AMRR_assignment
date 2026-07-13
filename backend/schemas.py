@@ -9,6 +9,8 @@ class TaskBase(BaseModel):
     links: Optional[str] = None
     status: Optional[TaskStatus] = TaskStatus.PENDING
     parent_id: Optional[int] = None
+    deadline: Optional[datetime] = None
+    user_email: Optional[str] = None
 
 class TaskCreate(TaskBase):
     pass
@@ -16,7 +18,9 @@ class TaskCreate(TaskBase):
 class TaskUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
+    links: Optional[str] = None
     status: Optional[TaskStatus] = None
+    deadline: Optional[datetime] = None
 
 class BulkTaskUpdate(BaseModel):
     task_ids: List[int]

@@ -14,6 +14,7 @@ export interface Task {
   status: TaskStatus;
   parent_id: number | null;
   created_at: string;
+  deadline?: string | null;
 }
 
 export interface TaskWithSubtasks extends Task {
@@ -26,6 +27,7 @@ export interface TaskCreate {
   links?: string | null;
   status?: TaskStatus;
   parent_id?: number;
+  deadline?: string | null;
 }
 
 export interface TaskUpdate {
@@ -33,4 +35,5 @@ export interface TaskUpdate {
   description?: string;
   links?: string | null;
   status?: TaskStatus;
+  deadline?: string | null;
 }

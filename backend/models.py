@@ -19,6 +19,8 @@ class Task(Base):
     status = Column(Enum(TaskStatus), default=TaskStatus.PENDING)
     parent_id = Column(Integer, ForeignKey("tasks.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    user_email = Column(String, index=True, nullable=True)
+    deadline = Column(DateTime(timezone=True), nullable=True)
 
     # Establish hierarchical relationship
     subtasks = relationship("Task", backref=backref("parent", remote_side="Task.id"), cascade="all, delete-orphan")

@@ -15,3 +15,16 @@ def get_db():
         yield db
     finally:
         db.close()
+
+def upgrade_db():
+    from sqlalchemy import inspect, text
+    inspector = inspect(engine)
+    if 'tasks' in inspector.get_table_names():
+        columns = [c['name'] for c in inspector.get_columns('tasks')]
+        with engine.begin() as conn:
+            if 'user_email' not in columns:
+                print("Adding user_email column to tasks table...")
+                conn.execute(text("ALTER TABLE tasks ADD COLUMN user_email VARCHAR"))
+            if 'deadline' not in columns:
+                print("Adding deadline column to tasks table...")
+                conn.execute(text("ALTER TABLE tasks ADD COLUMN deadline DATETIME"))

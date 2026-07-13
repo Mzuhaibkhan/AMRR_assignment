@@ -7,6 +7,29 @@ const api = axios.create({
   baseURL: API_URL,
 });
 
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+}, (error) => {
+  return Promise.reject(error);
+});
+
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response && error.response.status === 401) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      // If we are not already on the root or login flow, trigger a reload to reset State
+      window.location.reload();
+    }
+    return Promise.reject(error);
+  }
+);
+
 export const getTasks = async (): Promise<TaskWithSubtasks[]> => {
   const response = await api.get('/tasks');
   return response.data;
