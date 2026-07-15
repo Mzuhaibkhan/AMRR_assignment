@@ -126,15 +126,16 @@ def send_deadline_reminders():
         print(f"Running deadline reminders script. Current UTC time: {now}")
         
         # Query all non-completed tasks that have a deadline and ownership
-        tasks = db.query(models.Task).filter(
-            models.Task.status != models.TaskStatus.COMPLETED,
-            models.Task.deadline != None,
-            models.Task.user_email != None
-        ).all()
+        cursor = db.tasks.find({
+            "status": {"$ne": "Completed"},
+            "deadline": {"$ne": None},
+            "user_email": {"$ne": None}
+        })
+        tasks = list(cursor)
 
         user_tasks = {}
         for task in tasks:
-            deadline = task.deadline
+            deadline = task.get("deadline")
             if isinstance(deadline, str):
                 try:
                     if "T" in deadline:
@@ -142,7 +143,7 @@ def send_deadline_reminders():
                     else:
                         deadline = datetime.strptime(deadline, "%Y-%m-%d %H:%M:%S.%f")
                 except Exception as e:
-                    print(f"Failed to parse deadline string '{deadline}' for task ID {task.id}: {e}")
+                    print(f"Failed to parse deadline string '{deadline}' for task ID {task.get('_id')}: {e}")
                     continue
             
             if deadline.tzinfo is None:
@@ -161,17 +162,19 @@ def send_deadline_reminders():
                 # Task is pending but deadline is more than 24 hours in the future
                 continue
 
-            if task.user_email not in user_tasks:
-                user_tasks[task.user_email] = []
+            user_email = task.get("user_email")
+            if user_email not in user_tasks:
+                user_tasks[user_email] = []
             
-            user_tasks[task.user_email].append({
-                "title": task.title,
-                "description": task.description or "No description",
+            status_val = task.get("status")
+            user_tasks[user_email].append({
+                "title": task.get("title"),
+                "description": task.get("description") or "No description",
                 "deadline": deadline,
-                "status": task.status.value if hasattr(task.status, 'value') else str(task.status),
+                "status": status_val.value if hasattr(status_val, 'value') else str(status_val),
                 "status_label": status_label,
                 "urgency": urgency,
-                "is_subtask": task.parent_id is not None
+                "is_subtask": task.get("parent_id") is not None
             })
 
         if not user_tasks:
@@ -179,6 +182,12 @@ def send_deadline_reminders():
             return
 
         for email, items in user_tasks.items():
+            # Check user preference before sending
+            settings = db.user_settings.find_one({"email": email})
+            if settings and not settings.get("wants_reminders", True):
+                print(f"Skipping digest email for {email} (user disabled email reminders).")
+                continue
+                
             print(f"Preparing digest email for {email} containing {len(items)} tasks...")
             subject = "⏰ [Orbit Tasks] Pending Tasks & Approaching Deadlines Reminder"
             html = compose_email_html(email, items)
@@ -190,7 +199,8 @@ def send_deadline_reminders():
                 print(f"Failed to send reminders to {email}")
 
     finally:
-        db.close()
+        # MongoDB connection is managed automatically, no session close is needed here
+        pass
 
 if __name__ == "__main__":
     send_deadline_reminders()

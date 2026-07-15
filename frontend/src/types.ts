@@ -6,13 +6,22 @@ export const TaskStatusValues = {
 
 export type TaskStatus = typeof TaskStatusValues[keyof typeof TaskStatusValues];
 
+export const TaskPriorityValues = {
+  HIGH: "High",
+  MEDIUM: "Medium",
+  LOW: "Low",
+} as const;
+
+export type TaskPriority = typeof TaskPriorityValues[keyof typeof TaskPriorityValues];
+
 export interface Task {
-  id: number;
+  id: string;
   title: string;
   description: string | null;
   links: string | null;
   status: TaskStatus;
-  parent_id: number | null;
+  priority: TaskPriority;
+  parent_id: string | null;
   created_at: string;
   deadline?: string | null;
 }
@@ -26,7 +35,8 @@ export interface TaskCreate {
   description?: string;
   links?: string | null;
   status?: TaskStatus;
-  parent_id?: number;
+  priority?: TaskPriority;
+  parent_id?: string;
   deadline?: string | null;
 }
 
@@ -35,5 +45,10 @@ export interface TaskUpdate {
   description?: string;
   links?: string | null;
   status?: TaskStatus;
+  priority?: TaskPriority;
   deadline?: string | null;
+}
+
+export interface UserSettings {
+  wants_reminders: boolean;
 }

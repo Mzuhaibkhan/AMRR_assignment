@@ -2,19 +2,21 @@ from fastapi import FastAPI, Depends, HTTPException, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
-from sqlalchemy.orm import Session
 from typing import List
 import os
-import traceback
+import logging
 
 import models, schemas, crud
-from database import engine, get_db, upgrade_db
+from database import get_db, upgrade_db
 from send_emails import send_deadline_reminders
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 
-# Run migrations and setup tables
-models.Base.metadata.create_all(bind=engine)
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Run migrations (create MongoDB indexes)
 upgrade_db()
 
 app = FastAPI(title="Task Management API")
@@ -26,18 +28,16 @@ async def get_current_user(authorization: str = Header(None)):
     token = authorization.split(" ")[1]
     client_id = os.environ.get("GOOGLE_CLIENT_ID")
     
-    # Development/Testing/Mock Bypass Mode
-    if not client_id or token.startswith("mock-") or "@" in token:
-        email = token if "@" in token else "mock_user@example.com"
-        return {"email": email}
+    if not client_id:
+        raise HTTPException(
+            status_code=500, 
+            detail="GOOGLE_CLIENT_ID environment variable is not configured on the server"
+        )
 
     try:
         idinfo = id_token.verify_oauth2_token(token, google_requests.Request(), client_id)
         return {"email": idinfo["email"]}
     except ValueError as e:
-        # Fallback to check if token is a valid email for development purposes
-        if "@" in token:
-            return {"email": token}
         raise HTTPException(status_code=401, detail=f"Invalid Google token: {str(e)}")
 
 @app.on_event("startup")
@@ -68,7 +68,8 @@ async def keep_alive():
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    return JSONResponse(status_code=500, content={"message": str(exc), "traceback": traceback.format_exc()})
+    logger.error(f"Global exception occurred: {exc}", exc_info=True)
+    return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
 
 # Setup CORS
 app.add_middleware(
@@ -80,48 +81,56 @@ app.add_middleware(
 )
 
 @app.get("/api/tasks", response_model=List[schemas.TaskWithSubtasks])
-def read_tasks(root_only: bool = True, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+def read_tasks(root_only: bool = True, db = Depends(get_db), current_user: dict = Depends(get_current_user)):
     """Fetch tasks. By default, returns only root tasks (with their subtasks nested)."""
     return crud.get_tasks(db, user_email=current_user["email"], root_only=root_only)
 
 @app.post("/api/tasks", response_model=schemas.Task)
-def create_task(task: schemas.TaskCreate, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+def create_task(task: schemas.TaskCreate, db = Depends(get_db), current_user: dict = Depends(get_current_user)):
     try:
         return crud.create_task(db=db, task=task, user_email=current_user["email"])
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/api/tasks/{task_id}", response_model=schemas.TaskWithSubtasks)
-def read_task(task_id: int, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+def read_task(task_id: str, db = Depends(get_db), current_user: dict = Depends(get_current_user)):
     db_task = crud.get_task(db, task_id=task_id, user_email=current_user["email"])
     if db_task is None:
         raise HTTPException(status_code=404, detail="Task not found")
     return db_task
 
 @app.put("/api/tasks/{task_id}", response_model=schemas.Task)
-def update_task(task_id: int, task: schemas.TaskUpdate, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+def update_task(task_id: str, task: schemas.TaskUpdate, db = Depends(get_db), current_user: dict = Depends(get_current_user)):
     db_task = crud.update_task(db, task_id, task, user_email=current_user["email"])
     if db_task is None:
         raise HTTPException(status_code=404, detail="Task not found")
     return db_task
 
 @app.delete("/api/tasks/{task_id}")
-def delete_task(task_id: int, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+def delete_task(task_id: str, db = Depends(get_db), current_user: dict = Depends(get_current_user)):
     success = crud.delete_task(db, task_id, user_email=current_user["email"])
     if not success:
         raise HTTPException(status_code=404, detail="Task not found")
     return {"detail": "Task deleted"}
 
 @app.put("/api/tasks/bulk/update", response_model=List[schemas.Task])
-def bulk_update_tasks(update_data: schemas.BulkTaskUpdate, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+def bulk_update_tasks(update_data: schemas.BulkTaskUpdate, db = Depends(get_db), current_user: dict = Depends(get_current_user)):
     return crud.bulk_update_tasks(db, update_data, user_email=current_user["email"])
 
 @app.post("/api/tasks/bulk/delete")
-def bulk_delete_tasks(delete_data: schemas.BulkTaskDelete, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+def bulk_delete_tasks(delete_data: schemas.BulkTaskDelete, db = Depends(get_db), current_user: dict = Depends(get_current_user)):
     success = crud.bulk_delete_tasks(db, delete_data, user_email=current_user["email"])
     if not success:
         raise HTTPException(status_code=400, detail="Bulk delete failed")
     return {"detail": "Tasks deleted"}
+
+@app.get("/api/user/settings", response_model=schemas.UserSettings)
+def read_user_settings(db = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    return crud.get_user_settings(db, email=current_user["email"])
+
+@app.put("/api/user/settings", response_model=schemas.UserSettings)
+def update_user_settings(settings: schemas.UserSettings, db = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    return crud.update_user_settings(db, email=current_user["email"], settings=settings)
 
 @app.post("/api/tasks/send-reminders")
 def trigger_send_reminders(authorization: str = Header(None)):

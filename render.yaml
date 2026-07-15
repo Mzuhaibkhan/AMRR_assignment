@@ -1,0 +1,41 @@
+services:
+  # Backend FastAPI Web Service
+  - type: web
+    name: orbit-tasks-backend
+    runtime: python
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.0
+      - key: MONGODB_URL
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: RESEND_API_KEYS
+        sync: false
+      - key: EMAIL_FROM
+        value: Orbit Tasks <onboarding@resend.dev>
+      - key: CRON_SECRET
+        sync: false
+
+  # Frontend Vite React Static Site (Free Tier)
+  - type: web
+    name: orbit-tasks-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm run build
+    publishPath: dist
+    routes:
+      # Rewrite rule to handle frontend single-page-app routing (React Router)
+      - type: rewrite
+        source: /assets/*
+        destination: /assets/*
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_GOOGLE_CLIENT_ID
+        sync: false
+      - key: VITE_API_URL
+        sync: false

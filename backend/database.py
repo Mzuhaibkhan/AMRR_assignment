@@ -1,30 +1,28 @@
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, declarative_base
+from pymongo import MongoClient, ASCENDING
+import os
 
-SQLALCHEMY_DATABASE_URL = "sqlite:///./task_db.sqlite3"
+MONGODB_URL = os.environ.get("MONGODB_URL", "mongodb://localhost:27017")
+client = MongoClient(MONGODB_URL)
+db = client.get_database("orbit_tasks")
 
-engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# For backwards compatibility with cron scripts/dependencies calling SessionLocal()
+def SessionLocal():
+    return db
 
-Base = declarative_base()
-
-# Dependency
+# Dependency for FastAPI
 def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+    yield db
 
 def upgrade_db():
-    from sqlalchemy import inspect, text
-    inspector = inspect(engine)
-    if 'tasks' in inspector.get_table_names():
-        columns = [c['name'] for c in inspector.get_columns('tasks')]
-        with engine.begin() as conn:
-            if 'user_email' not in columns:
-                print("Adding user_email column to tasks table...")
-                conn.execute(text("ALTER TABLE tasks ADD COLUMN user_email VARCHAR"))
-            if 'deadline' not in columns:
-                print("Adding deadline column to tasks table...")
-                conn.execute(text("ALTER TABLE tasks ADD COLUMN deadline DATETIME"))
+    """Initializes MongoDB indexes for tasks and user settings collections."""
+    print("Initializing MongoDB indexes...")
+    try:
+        # Create indexes on tasks collection
+        db.tasks.create_index([("user_email", ASCENDING)])
+        db.tasks.create_index([("parent_id", ASCENDING)])
+        
+        # Create unique index on user_settings collection
+        db.user_settings.create_index([("email", ASCENDING)], unique=True)
+        print("MongoDB indexes created successfully.")
+    except Exception as e:
+        print(f"Failed to create MongoDB indexes: {e}")

@@ -1,20 +1,29 @@
 import React, { useState, useEffect } from 'react';
-import { getTasks, createTask, updateTask, bulkUpdateTasks, bulkDeleteTasks } from './api';
-import type { TaskWithSubtasks, TaskStatus, TaskCreate, Task } from './types';
-import { TaskStatusValues } from './types';
-import { Plus, Check, Loader2, ListTodo, Trash2, Edit2, Play, Circle, CheckCircle2, Clock, LogOut } from 'lucide-react';
+import { getTasks, createTask, updateTask, bulkUpdateTasks, bulkDeleteTasks, getUserSettings, updateUserSettings } from './api';
+import type { TaskWithSubtasks, TaskStatus, TaskPriority, TaskCreate, Task, UserSettings } from './types';
+import { TaskStatusValues, TaskPriorityValues } from './types';
+import { Plus, Check, Loader2, ListTodo, Trash2, Edit2, Play, Circle, CheckCircle2, Clock, LogOut, Settings, Search, ArrowUpDown } from 'lucide-react';
+
+const priorityWeight = {
+  [TaskPriorityValues.HIGH]: 3,
+  [TaskPriorityValues.MEDIUM]: 2,
+  [TaskPriorityValues.LOW]: 1,
+};
 
 export default function App() {
   const [tasks, setTasks] = useState<TaskWithSubtasks[]>([]);
   const [loading, setLoading] = useState(false);
-  const [selectedTasks, setSelectedTasks] = useState<Set<number>>(new Set());
+  const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set());
 
   // Authentication State
   const [token, setToken] = useState<string | null>(localStorage.getItem('token'));
   const [user, setUser] = useState<{ email: string; name?: string; picture?: string } | null>(
     localStorage.getItem('user') ? JSON.parse(localStorage.getItem('user')!) : null
   );
-  const [mockEmailInput, setMockEmailInput] = useState('');
+
+  // User Settings State
+  const [userSettings, setUserSettings] = useState<UserSettings>({ wants_reminders: true });
+  const [showSettings, setShowSettings] = useState(false);
 
   // Form State
   const [showModal, setShowModal] = useState(false);
@@ -23,10 +32,18 @@ export default function App() {
     description: '', 
     links: '', 
     status: TaskStatusValues.PENDING,
+    priority: TaskPriorityValues.MEDIUM,
     deadline: ''
   });
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [parentTaskId, setParentTaskId] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [parentTaskId, setParentTaskId] = useState<string | null>(null);
+
+  // Search & Filter States
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('All');
+  const [priorityFilter, setPriorityFilter] = useState('All');
+  const [deadlineFilter, setDeadlineFilter] = useState('All');
+  const [sortBy, setSortBy] = useState<'deadline' | 'priority' | 'created_at'>('created_at');
 
   // Google Login Initialization
   useEffect(() => {
@@ -75,6 +92,7 @@ export default function App() {
   useEffect(() => {
     if (token) {
       fetchTasks();
+      fetchUserSettings();
     }
   }, [token]);
 
@@ -90,6 +108,24 @@ export default function App() {
     }
   };
 
+  const fetchUserSettings = async () => {
+    try {
+      const data = await getUserSettings();
+      setUserSettings(data);
+    } catch (e) {
+      console.error("Failed to load user settings", e);
+    }
+  };
+
+  const handleToggleReminders = async (wants: boolean) => {
+    try {
+      const updated = await updateUserSettings({ wants_reminders: wants });
+      setUserSettings(updated);
+    } catch (e) {
+      console.error("Failed to update user settings", e);
+    }
+  };
+
   const handleSignOut = () => {
     setToken(null);
     setUser(null);
@@ -99,20 +135,7 @@ export default function App() {
     window.google?.accounts.id.disableAutoSelect();
   };
 
-  const handleMockLogin = (e: React.FormEvent) => {
-    e.preventDefault();
-    const email = mockEmailInput.trim() || 'mock_user@example.com';
-    if (!email.includes('@')) {
-      alert('Please enter a valid email address.');
-      return;
-    }
-    setToken(email);
-    setUser({ email, name: email.split('@')[0], picture: '' });
-    localStorage.setItem("token", email);
-    localStorage.setItem("user", JSON.stringify({ email, name: email.split('@')[0], picture: '' }));
-  };
-
-  const toggleSelection = (id: number) => {
+  const toggleSelection = (id: string) => {
     const newSelection = new Set(selectedTasks);
     if (newSelection.has(id)) {
       newSelection.delete(id);
@@ -122,7 +145,7 @@ export default function App() {
     setSelectedTasks(newSelection);
   };
 
-  const isSelected = (id: number) => selectedTasks.has(id);
+  const isSelected = (id: string) => selectedTasks.has(id);
 
   const handleBulkStatusChange = async (status: TaskStatus) => {
     if (selectedTasks.size === 0) return;
@@ -156,6 +179,7 @@ export default function App() {
           description: formData.description, 
           links: formData.links, 
           status: formData.status,
+          priority: formData.priority,
           deadline: formattedDeadline
         });
       } else {
@@ -181,6 +205,7 @@ export default function App() {
       description: '', 
       links: '', 
       status: TaskStatusValues.PENDING,
+      priority: TaskPriorityValues.MEDIUM,
       deadline: ''
     });
   };
@@ -193,12 +218,13 @@ export default function App() {
       description: task.description || '', 
       links: task.links || '', 
       status: task.status,
+      priority: task.priority || TaskPriorityValues.MEDIUM,
       deadline: task.deadline ? task.deadline.substring(0, 16) : ''
     });
     setShowModal(true);
   };
 
-  const openCreateModal = (parentId: number | null = null) => {
+  const openCreateModal = (parentId: string | null = null) => {
     resetForm();
     setParentTaskId(parentId);
     setShowModal(true);
@@ -245,6 +271,25 @@ export default function App() {
     );
   };
 
+  const renderSubtaskProgress = (task: TaskWithSubtasks) => {
+    if (!task.subtasks || task.subtasks.length === 0) return null;
+    const total = task.subtasks.length;
+    const completed = task.subtasks.filter(s => s.status === TaskStatusValues.COMPLETED).length;
+    const percentage = Math.round((completed / total) * 100);
+
+    return (
+      <div className="subtask-progress-container" style={{ marginTop: '0.75rem', marginLeft: '1.5rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>
+          <span>Subtasks: {completed}/{total} completed</span>
+          <span>{percentage}%</span>
+        </div>
+        <div className="subtask-progress-bar-bg" style={{ width: '100%', height: '4px', background: 'rgba(255,255,255,0.1)', borderRadius: '2px', overflow: 'hidden' }}>
+          <div className="subtask-progress-bar-fill" style={{ width: `${percentage}%`, height: '100%', background: 'var(--success)', borderRadius: '2px', transition: 'width 0.3s ease' }}></div>
+        </div>
+      </div>
+    );
+  };
+
   const renderTask = (task: TaskWithSubtasks | Task, isSubtask = false) => {
     return (
       <div key={task.id} className="task-wrapper">
@@ -256,7 +301,7 @@ export default function App() {
               checked={isSelected(task.id)}
               onChange={() => toggleSelection(task.id)}
             />
-            <div className="task-content" onClick={() => !isSubtask && toggleSelection(task.id)}>
+            <div className="task-content" onClick={() => toggleSelection(task.id)}>
               <div className={`task-title ${task.status === TaskStatusValues.COMPLETED ? 'completed' : ''}`}>
                 {getStatusIcon(task.status)}
                 {task.title}
@@ -273,6 +318,9 @@ export default function App() {
             </div>
             
             <div className="task-actions">
+              <span className={`priority-badge priority-${task.priority?.toLowerCase() || 'medium'}`} style={{ marginRight: '0.5rem' }}>
+                {task.priority || 'Medium'}
+              </span>
               <span className={`status-badge status-${task.status.toLowerCase().replace(' ', '')}`}>
                 {task.status}
               </span>
@@ -286,6 +334,8 @@ export default function App() {
               </button>
             </div>
           </div>
+          {/* Subtask progress bar */}
+          {!isSubtask && 'subtasks' in task && renderSubtaskProgress(task)}
         </div>
         
         {/* Render Subtasks if any */}
@@ -298,6 +348,99 @@ export default function App() {
     );
   };
 
+  // Compute Statistics
+  const getStats = () => {
+    let total = 0;
+    let completed = 0;
+    let inProgress = 0;
+    let pending = 0;
+    let overdue = 0;
+
+    const traverse = (t: Task | TaskWithSubtasks) => {
+      total++;
+      if (t.status === TaskStatusValues.COMPLETED) completed++;
+      else if (t.status === TaskStatusValues.IN_PROGRESS) inProgress++;
+      else pending++;
+
+      if (t.deadline && t.status !== TaskStatusValues.COMPLETED) {
+        if (new Date(t.deadline).getTime() < new Date().getTime()) {
+          overdue++;
+        }
+      }
+
+      if ('subtasks' in t && t.subtasks) {
+        t.subtasks.forEach(traverse);
+      }
+    };
+
+    tasks.forEach(traverse);
+    const completionRate = total > 0 ? Math.round((completed / total) * 100) : 0;
+    return { total, completed, inProgress, pending, overdue, completionRate };
+  };
+
+  const stats = getStats();
+
+  // Search, Filter and Sort
+  const getFilteredTasks = () => {
+    return tasks
+      .map(task => {
+        const filteredSubtasks = task.subtasks ? task.subtasks.filter(sub => {
+          const matchesSearch = 
+            sub.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            (sub.description && sub.description.toLowerCase().includes(searchQuery.toLowerCase()));
+          const matchesStatus = statusFilter === 'All' || sub.status === statusFilter;
+          const matchesPriority = priorityFilter === 'All' || sub.priority === priorityFilter;
+          
+          let matchesDeadline = true;
+          if (deadlineFilter !== 'All' && sub.deadline) {
+            const diff = new Date(sub.deadline).getTime() - new Date().getTime();
+            if (deadlineFilter === 'Overdue') matchesDeadline = diff < 0 && sub.status !== TaskStatusValues.COMPLETED;
+            if (deadlineFilter === 'Due Soon') matchesDeadline = diff >= 0 && diff <= 24 * 60 * 60 * 1000 && sub.status !== TaskStatusValues.COMPLETED;
+          } else if (deadlineFilter !== 'All') {
+            matchesDeadline = false;
+          }
+          
+          return matchesSearch && matchesStatus && matchesPriority && matchesDeadline;
+        }) : [];
+
+        return { ...task, subtasks: filteredSubtasks };
+      })
+      .filter(task => {
+        const matchesSearch = 
+          task.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          (task.description && task.description.toLowerCase().includes(searchQuery.toLowerCase()));
+        
+        const matchesStatus = statusFilter === 'All' || task.status === statusFilter;
+        const matchesPriority = priorityFilter === 'All' || task.priority === priorityFilter;
+        
+        let matchesDeadline = true;
+        if (deadlineFilter !== 'All' && task.deadline) {
+          const diff = new Date(task.deadline).getTime() - new Date().getTime();
+          if (deadlineFilter === 'Overdue') matchesDeadline = diff < 0 && task.status !== TaskStatusValues.COMPLETED;
+          if (deadlineFilter === 'Due Soon') matchesDeadline = diff >= 0 && diff <= 24 * 60 * 60 * 1000 && task.status !== TaskStatusValues.COMPLETED;
+        } else if (deadlineFilter !== 'All') {
+          matchesDeadline = false;
+        }
+
+        return (matchesSearch && matchesStatus && matchesPriority && matchesDeadline) || task.subtasks.length > 0;
+      })
+      .sort((a, b) => {
+        if (sortBy === 'deadline') {
+          if (!a.deadline) return 1;
+          if (!b.deadline) return -1;
+          return new Date(a.deadline).getTime() - new Date(b.deadline).getTime();
+        }
+        if (sortBy === 'priority') {
+          const weightA = priorityWeight[a.priority] || 0;
+          const weightB = priorityWeight[b.priority] || 0;
+          return weightB - weightA;
+        }
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      });
+  };
+
+  const filteredTasks = getFilteredTasks();
+
   if (!token) {
     return (
       <div className="login-screen">
@@ -305,31 +448,12 @@ export default function App() {
           <ListTodo size={48} className="text-primary-color" style={{ margin: '0 auto 1.5rem auto' }} />
           <h1 className="title" style={{ fontSize: '1.8rem', marginBottom: '0.5rem' }}>Orbit Tasks</h1>
           <p className="text-muted" style={{ fontSize: '0.9rem', marginBottom: '2rem' }}>
-            Manage your personal tasks, organize subtasks, and track deadlines securely.
+            Manage your tasks, coordinate subtasks, and track deadlines securely.
           </p>
           
-          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1.5rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'center', margin: '2rem 0' }}>
             <div id="google-login-btn"></div>
           </div>
-
-          <div className="login-divider">OR</div>
-
-          <form onSubmit={handleMockLogin}>
-            <div className="input-group" style={{ marginBottom: '1rem', textAlign: 'left' }}>
-              <label className="input-label" style={{ marginBottom: '0.25rem' }}>Mock Email Bypass</label>
-              <input 
-                type="email" 
-                className="form-input" 
-                placeholder="developer@example.com"
-                required
-                value={mockEmailInput}
-                onChange={e => setMockEmailInput(e.target.value)}
-              />
-            </div>
-            <button type="submit" className="btn btn-ghost" style={{ width: '100%', justifyContent: 'center' }}>
-              Enter as Mock User
-            </button>
-          </form>
         </div>
       </div>
     );
@@ -360,6 +484,9 @@ export default function App() {
                 <span className="user-name">{user.name || 'User'}</span>
                 <span className="user-email">{user.email}</span>
               </div>
+              <button className="btn btn-ghost" style={{ padding: '0.25rem', borderRadius: '50%', border: 'none' }} onClick={() => setShowSettings(true)} title="Settings">
+                <Settings size={16} className="text-muted" />
+              </button>
               <button className="btn btn-ghost" style={{ padding: '0.25rem', borderRadius: '50%', border: 'none' }} onClick={handleSignOut} title="Sign Out">
                 <LogOut size={16} className="text-muted" />
               </button>
@@ -371,18 +498,95 @@ export default function App() {
         </div>
       </header>
 
+      {/* Stats Dashboard Section */}
+      <div className="stats-dashboard" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem', marginBottom: '2rem' }}>
+        <div className="glass-panel" style={{ padding: '1rem', textAlign: 'center' }}>
+          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Total Tasks</div>
+          <div style={{ fontSize: '1.8rem', fontWeight: 700, margin: '0.25rem 0' }}>{stats.total}</div>
+          <div style={{ fontSize: '0.75rem', color: 'var(--success)' }}>{stats.completed} Completed</div>
+        </div>
+        <div className="glass-panel" style={{ padding: '1rem', textAlign: 'center' }}>
+          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Completion Rate</div>
+          <div style={{ fontSize: '1.8rem', fontWeight: 700, margin: '0.25rem 0' }}>{stats.completionRate}%</div>
+          <div style={{ width: '100%', height: '4px', background: 'rgba(255,255,255,0.1)', borderRadius: '2px', overflow: 'hidden' }}>
+            <div style={{ width: `${stats.completionRate}%`, height: '100%', background: 'var(--primary-color)' }}></div>
+          </div>
+        </div>
+        <div className="glass-panel" style={{ padding: '1rem', textAlign: 'center' }}>
+          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Active Tasks</div>
+          <div style={{ fontSize: '1.8rem', fontWeight: 700, margin: '0.25rem 0' }}>{stats.inProgress + stats.pending}</div>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{stats.inProgress} In Progress | {stats.pending} Pending</div>
+        </div>
+        <div className="glass-panel" style={{ padding: '1rem', textAlign: 'center' }}>
+          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Overdue Tasks</div>
+          <div style={{ fontSize: '1.8rem', fontWeight: 700, margin: '0.25rem 0', color: 'var(--danger)' }}>{stats.overdue}</div>
+          <div style={{ fontSize: '0.75rem', color: 'var(--danger)' }}>Action Required</div>
+        </div>
+      </div>
+
+      {/* Toolbar / Filters Section */}
+      <div className="glass-panel" style={{ padding: '1rem', marginBottom: '2rem', display: 'flex', flexWrap: 'wrap', gap: '1rem', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', flexGrow: 1, gap: '0.75rem', minWidth: '280px', position: 'relative' }}>
+          <Search size={16} className="text-muted" style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)' }} />
+          <input 
+            type="text" 
+            placeholder="Search tasks by title or description..." 
+            className="form-input" 
+            style={{ paddingLeft: '2.5rem' }}
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+          />
+        </div>
+        <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Status:</span>
+            <select className="form-select" style={{ padding: '0.4rem 2rem 0.4rem 0.75rem', width: 'auto', fontSize: '0.8rem' }} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+              <option value="All">All</option>
+              <option value="Pending">Pending</option>
+              <option value="In Progress">In Progress</option>
+              <option value="Completed">Completed</option>
+            </select>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Priority:</span>
+            <select className="form-select" style={{ padding: '0.4rem 2rem 0.4rem 0.75rem', width: 'auto', fontSize: '0.8rem' }} value={priorityFilter} onChange={e => setPriorityFilter(e.target.value)}>
+              <option value="All">All</option>
+              <option value="High">High</option>
+              <option value="Medium">Medium</option>
+              <option value="Low">Low</option>
+            </select>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Deadline:</span>
+            <select className="form-select" style={{ padding: '0.4rem 2rem 0.4rem 0.75rem', width: 'auto', fontSize: '0.8rem' }} value={deadlineFilter} onChange={e => setDeadlineFilter(e.target.value)}>
+              <option value="All">All</option>
+              <option value="Overdue">Overdue</option>
+              <option value="Due Soon">Due Soon</option>
+            </select>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}><ArrowUpDown size={14} style={{ display: 'inline', marginRight: '4px' }} />Sort:</span>
+            <select className="form-select" style={{ padding: '0.4rem 2rem 0.4rem 0.75rem', width: 'auto', fontSize: '0.8rem' }} value={sortBy} onChange={e => setSortBy(e.target.value as any)}>
+              <option value="created_at">Created Date</option>
+              <option value="deadline">Deadline</option>
+              <option value="priority">Priority</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
       {loading ? (
         <div style={{ display: 'flex', justifyContent: 'center', padding: '3rem' }}>
           <Loader2 className="animate-spin text-primary-color" size={32} />
         </div>
       ) : (
         <div className="task-list">
-          {tasks.length === 0 ? (
+          {filteredTasks.length === 0 ? (
             <div className="glass-panel" style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>
-              No tasks yet. Create one to get started!
+              No tasks found matching your criteria.
             </div>
           ) : (
-            tasks.map(t => renderTask(t))
+            filteredTasks.map(t => renderTask(t))
           )}
         </div>
       )}
@@ -405,6 +609,36 @@ export default function App() {
           </button>
         </div>
       </div>
+
+      {/* User Settings Modal */}
+      {showSettings && (
+        <div className="modal-overlay" onClick={() => setShowSettings(false)}>
+          <div className="glass-panel modal-content" onClick={e => e.stopPropagation()}>
+            <h2 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Settings size={22} />
+              Settings
+            </h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
+                <div style={{ flexGrow: 1 }}>
+                  <div style={{ fontWeight: 600 }}>Email reminders</div>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Receive email digests about upcoming or overdue deadlines.</div>
+                </div>
+                <input 
+                  type="checkbox" 
+                  className="custom-checkbox"
+                  style={{ width: '1.5rem', height: '1.5rem' }}
+                  checked={userSettings.wants_reminders}
+                  onChange={e => handleToggleReminders(e.target.checked)}
+                />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1.5rem' }}>
+                <button className="btn btn-primary" onClick={() => setShowSettings(false)}>Close</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Task Modal */}
       {showModal && (
@@ -452,17 +686,31 @@ export default function App() {
                   onChange={e => setFormData({ ...formData, deadline: e.target.value })}
                 />
               </div>
-              <div className="input-group">
-                <label className="input-label">Status</label>
-                <select 
-                  className="form-select"
-                  value={formData.status}
-                  onChange={e => setFormData({ ...formData, status: e.target.value as TaskStatus })}
-                >
-                  <option value={TaskStatusValues.PENDING}>Pending</option>
-                  <option value={TaskStatusValues.IN_PROGRESS}>In Progress</option>
-                  <option value={TaskStatusValues.COMPLETED}>Completed</option>
-                </select>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div className="input-group">
+                  <label className="input-label">Priority</label>
+                  <select 
+                    className="form-select"
+                    value={formData.priority}
+                    onChange={e => setFormData({ ...formData, priority: e.target.value as TaskPriority })}
+                  >
+                    <option value={TaskPriorityValues.LOW}>Low</option>
+                    <option value={TaskPriorityValues.MEDIUM}>Medium</option>
+                    <option value={TaskPriorityValues.HIGH}>High</option>
+                  </select>
+                </div>
+                <div className="input-group">
+                  <label className="input-label">Status</label>
+                  <select 
+                    className="form-select"
+                    value={formData.status}
+                    onChange={e => setFormData({ ...formData, status: e.target.value as TaskStatus })}
+                  >
+                    <option value={TaskStatusValues.PENDING}>Pending</option>
+                    <option value={TaskStatusValues.IN_PROGRESS}>In Progress</option>
+                    <option value={TaskStatusValues.COMPLETED}>Completed</option>
+                  </select>
+                </div>
               </div>
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem', marginTop: '2rem' }}>
                 <button type="button" className="btn btn-ghost" onClick={() => setShowModal(false)}>Cancel</button>
